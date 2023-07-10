@@ -16,8 +16,8 @@ class PurePursuit(object):
     """
     def __init__(self):
         self.odom_topic       = rospy.get_param("~odom_topic")
-        self.lookahead        = # FILL IN #
-        self.speed            = # FILL IN #
+        self.lookahead        = 1.0
+        self.speed            = 0.5
         self.wheelbase_length = # FILL IN #
         self.trajectory  = utils.LineTrajectory("/followed_trajectory")
         self.traj_sub = rospy.Subscriber("/trajectory/current", PoseArray, self.trajectory_callback, queue_size=1)
@@ -30,6 +30,9 @@ class PurePursuit(object):
         self.trajectory.clear()
         self.trajectory.fromPoseArray(msg)
         self.trajectory.publish_viz(duration=0.0)
+
+
+    def controller(self,
 
 
 if __name__=="__main__":
