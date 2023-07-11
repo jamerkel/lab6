@@ -47,8 +47,8 @@ class PathPlan(object):
         pre_erosion /= 100.
 
         #apply transformation and erosion to map, convert to m
-        radius = 50
-        footprint = disk(radius)
+        radius = 15
+        footprint = disk(radius) #this isnt working rn
         self.data = binary_erosion(pre_erosion, selem=footprint).astype(np.float32)
         self.data *= 100.
 
