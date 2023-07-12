@@ -16,12 +16,19 @@ class PurePursuit(object):
     def __init__(self):
         self.odom_topic = rospy.get_param("~odom_topic")
         self.lookahead = rospy.get_param("~lookahead", 1.0)
-        self.speed = rospy.get_param("~speed", 1.0)
+        self.speed = rospy.get_param("~speed", 0.5)
         self.wheelbase_length = rospy.get_param("~wheelbase_length", 1.0)
         self.trajectory = utils.LineTrajectory("/followed_trajectory") # provided path
         self.traj_sub = rospy.Subscriber("/trajectory/current", PoseArray, self.trajectory_callback, queue_size=1)
-        self.drive_pub = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
+        self.drive_pub = rospy.Publisher("/vesc/ackermann_cmd_mux/input/navigation", AckermannDriveStamped, queue_size=1)
         self.odom_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odom_callback)
+        self.localize_sub = rospy.Subscriber("/inferred_pose", PoseStamped, self.localize_cb, queue_size=10)
+        self.current_pose = None
+
+    def localize_cb(self, pose):
+
+        self.current_pose = pose.pose
+
 
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
@@ -34,19 +41,17 @@ class PurePursuit(object):
     def odom_callback(self, msg):
         ''' Pure pursuit control loop
         '''
-        # Get current position and orientation from odometry
-        current_pose = msg.pose.pose
-        current_position = current_pose.position
-        current_orientation = current_pose.orientation
+        while self.current_pose == None:
+            rospy.sleep()
 
         # Compute the closest point on the trajectory
-        closest_point, closest_segment = self.get_closest_point(current_position)
+        closest_point, closest_segment = self.get_closest_point(self.current_pose.position)
 
         # Compute the lookahead point
         lookahead_point = self.get_lookahead_point(closest_segment, closest_point, self.lookahead)
 
         # Compute the steering angle
-        steering_angle = self.compute_steering_angle(current_position, current_orientation, lookahead_point)
+        steering_angle = self.compute_steering_angle(lookahead_point)
 
         # Create and publish the AckermannDriveStamped message
         drive_msg = AckermannDriveStamped()
@@ -55,7 +60,7 @@ class PurePursuit(object):
         drive_msg.drive.speed = self.speed
         self.drive_pub.publish(drive_msg)
 
-    def get_closest_point(self, current_position):
+    def get_closest_point(self):
         ''' Compute the closest point on the trajectory to the current position
         '''
         closest_dist = float('inf')
@@ -68,7 +73,7 @@ class PurePursuit(object):
             dist = self.distance_to_line(current_position, p0, p1)
             if dist < closest_dist:
                 closest_dist = dist
-                closest_point = self.get_closest_point_on_segment(current_position, p0, p1)
+                closest_point = self.get_closest_point_on_segment(self.current_pose.position, p0, p1)
                 closest_segment = i
 
         return closest_point, closest_segment
@@ -127,15 +132,15 @@ class PurePursuit(object):
         return lookahead_point
 
 
-    def compute_steering_angle(self, current_position, current_orientation, lookahead_point):
+    def compute_steering_angle(self, lookahead_point):
         ''' Compute the steering angle based on the current position, orientation, and lookahead point
         '''
         # Convert the current orientation to yaw angle
-        _, _, current_yaw = utils.tf.transformations.euler_from_quaternion([current_orientation.x, current_orientation.y, current_orientation.z, current_orientation.w])
+        _, _, current_yaw = utils.tf.transformations.euler_from_quaternion([self.current_pose.orientation.x, self.current_pose.orientation.y, self.current_pose.orientation.z, self.current_pose.orientation.w])
 
         # Compute the angle between the current position and the lookahead point
-        dx = lookahead_point[0] - current_position.x
-        dy = lookahead_point[1] - current_position.y
+        dx = lookahead_point[0] - self.current_pose.position.x
+        dy = lookahead_point[1] - current_pose.position.y
         target_yaw = np.arctan2(dy, dx)
 
         # Compute the steering angle

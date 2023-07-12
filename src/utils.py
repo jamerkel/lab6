@@ -121,6 +121,15 @@ class LineTrajectory(object):
             pose = Pose()
             pose.position.x = p[0]
             pose.position.y = p[1]
+            if i < len(self.points) - 3:
+                x = self.points[i+3][0]-p[0]
+                angle = np.arctan((self.points[i+3][1]-p[1])/x)
+                if abs(angle) > 0.05 or x < 0:
+                    angle += np.pi
+
+
+                pose.orientation.z = np.sin(angle / 2)
+                pose.orientation.w = np.cos(angle / 2)
             traj.poses.append(pose)
         return traj
 
