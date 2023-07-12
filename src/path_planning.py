@@ -7,7 +7,7 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 import rospkg
 import time, os
 from utils import LineTrajectory
-from skimage.morphology import binary_erosion, disk
+from scipy.ndimage import binary_erosion
 import tf
 import tf.transformations
 from Queue import Queue
@@ -25,11 +25,11 @@ class PathPlan(object):
         self.traj_pub = rospy.Publisher("/trajectory/current", PoseArray, queue_size=10)
         self.odom_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odom_cb)
         self.start_sub = rospy.Subscriber("/initialpose", PoseWithCovarianceStamped, self.initialize_start, queue_size=1)
-        self.obs_threshold = 50
 
         self.start_initialized = False
         self.goal_initialized = False
         self.path_planned = False
+        self.plan_thresh = None
 
     def map_cb(self, msg):
         self.res = msg.info.resolution #m/cell
@@ -42,18 +42,29 @@ class PathPlan(object):
 
         data = list(msg.data) #occupancydata list
         
-        pre_erosion = np.array(data, dtype=np.float32).reshape(self.h, self.w)
-        mask = pre_erosion == -1.
-        pre_erosion /= 100.
+        pre_erosion = np.array(data).reshape(self.h, self.w)
 
-        #apply transformation and erosion to map, convert to m
-        radius = 15
-        footprint = disk(radius) #this isnt working rn
-        self.data = binary_erosion(pre_erosion, selem=footprint).astype(np.float32)
-        self.data *= 100.
+        binary_dict = {0: 1, 100: 0, -1: -1}
+        occupancy_dict = {1: 0, 0: 100, -1: -1}
 
-        self.data[mask] = -1
-        self.data = self.data.astype(np.int8)
+        image = np.zeros((self.h, self.w))
+        for i in range(self.h):
+            for j in range(self.w):
+                value = pre_erosion[i, j]
+                image[i, j] = binary_dict[value]
+
+        #erode map
+        #radius = 10                               
+        k = 0
+        while k < 9:
+            image = binary_erosion(image, mask=(image==1))
+            k += 1
+    
+        self.data = np.zeros((self.h, self.w))
+        for i in range(self.h):
+            for j in range(self.w):
+                value = image[i, j]
+                self.data[i, j] = occupancy_dict[value]
                     
         print("Map Initialized")
 
@@ -70,7 +81,6 @@ class PathPlan(object):
         
         transformed = rotated / self.res
         print((transformed[0], transformed[1]))
-        print(self.data[int(transformed[1]), int(transformed[0])])
         
         return(tuple(transformed[:2].astype('int32')))
 
@@ -132,6 +142,7 @@ class PathPlan(object):
         parent = {}
         parent[start] = None
         print("planning path")
+        t1 = rospy.Time.now()
 
         while not queue.empty():
             current = queue.get()
@@ -144,7 +155,10 @@ class PathPlan(object):
                     current = parent[current]
                 path.reverse()
                 self.uv_to_traj(np.array(path))
+                t2 = rospy.Time.now()
+                self.plan_thresh = (t2 - t1).to_sec()
                 print("path planned!")
+                print("plan thresh: " + str(self.plan_thresh) + " sec")
                 # publish trajectory
                 self.traj_pub.publish(self.trajectory.toPoseArray())
 
@@ -173,7 +187,7 @@ class PathPlan(object):
             new_row = row + direction[0]
             new_col = col + direction[1]
 
-            if 0 <= new_row < self.h and 0 <= new_col < self.w and 0 <= self.data[new_row, new_col] < self.obs_threshold:
+            if 0 <= new_row < self.h and 0 <= new_col < self.w and self.data[new_row, new_col] == 0:
                 neighbors.append((new_col, new_row)) #send as u,v instead of v,u
 
         return neighbors
